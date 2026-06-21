@@ -11,6 +11,7 @@ DEBUG_LOG_FILE := SETTINGS_DIR "\debug.log"
 
 Windows := []
 SavedOrder := LoadSavedOrder()
+SavedIncluded := LoadSavedIncluded()
 DEFAULT_CYCLE_HOTKEY := "F21"
 CycleHotkey := ""
 CycleHotkeyRegistered := ""
@@ -25,6 +26,7 @@ DebugCheckbox := 0
 DebugEdit := 0
 DebugLines := []
 DebugEnabled := false
+IsUpdatingListView := false
 IsPaused := false
 IsCycling := false
 ListeningForHotkey := false
@@ -49,6 +51,7 @@ if HasArg("--smoke-test") {
         ExitApp 4
     SetCaptureHotkeys(true)
     SetCaptureHotkeys(false)
+    BuildMainGui()
     if !SetCycleHotkey(DEFAULT_CYCLE_HOTKEY, false, false)
         ExitApp 5
     ExitApp
@@ -479,7 +482,7 @@ BuildMainGui() {
     MainGui := Gui("+MinSize720x610", APP_NAME)
     MainGui.SetFont("s9", "Segoe UI")
     MainGui.Add("Text", "xm ym w680", "Detected Dofus windows. The cycle shortcut follows this order.")
-    WindowListView := MainGui.Add("ListView", "xm y+8 w680 h220 -Multi", ["#", "HWND", "PID", "Process", "Title"])
+    WindowListView := MainGui.Add("ListView", "xm y+8 w680 h220 -Multi Checked", ["#", "HWND", "PID", "Process", "Title"])
 
     btnRefresh := MainGui.Add("Button", "xm y+12 w90", "Refresh")
     btnUp := MainGui.Add("Button", "x+8 yp w90", "Move Up")
@@ -512,6 +515,7 @@ BuildMainGui() {
     DebugCheckbox.OnEvent("Click", ToggleDebugFromUi)
     btnClearDebug.OnEvent("Click", ClearDebugLog)
     btnCopyDebug.OnEvent("Click", CopyDebugLog)
+    WindowListView.OnEvent("ItemCheck", WindowIncludedChanged)
     MainGui.OnEvent("Close", HideMainGui)
 
     UpdateHotkeyUi()
@@ -603,30 +607,38 @@ CycleWindowsCore(allowRefreshOnFailure := true) {
         RefreshWindows(false, false)
     }
 
+    cycleWindows := GetIncludedWindows()
+
     if (Windows.Length = 0) {
         DebugLog("cycle ignored: no Dofus windows")
         MaybeShowNoWindowTip()
         return
     }
 
-    DebugLog("cycle begin windows=" Windows.Length " lastIndex=" LastCycleIndex " lastHwnd=" HwndHex(LastCycleHwnd))
-    LogWindowOrder()
+    if (cycleWindows.Length = 0) {
+        DebugLog("cycle ignored: no checked Dofus windows")
+        ShowTip("No Dofus windows are checked for cycling.")
+        return
+    }
+
+    DebugLog("cycle begin windows=" Windows.Length " included=" cycleWindows.Length " lastIndex=" LastCycleIndex " lastHwnd=" HwndHex(LastCycleHwnd))
+    LogWindowOrder(cycleWindows)
 
     activeHwnd := WinExist("A")
-    activeIndex := FindWindowIndexByHwnd(activeHwnd)
+    activeIndex := FindWindowIndexByHwnd(activeHwnd, cycleWindows)
     DebugLog("active " DescribeHwnd(activeHwnd) " activeIndex=" activeIndex)
 
     if (activeIndex = 0 && LastCycleHwnd)
-        activeIndex := FindWindowIndexByHwnd(LastCycleHwnd)
+        activeIndex := FindWindowIndexByHwnd(LastCycleHwnd, cycleWindows)
 
     baseIndex := activeIndex ? activeIndex : LastCycleIndex
-    if (baseIndex < 1 || baseIndex > Windows.Length)
+    if (baseIndex < 1 || baseIndex > cycleWindows.Length)
         baseIndex := 0
     DebugLog("cycle baseIndex=" baseIndex)
 
-    Loop Windows.Length {
-        targetIndex := Mod(baseIndex + A_Index - 1, Windows.Length) + 1
-        target := Windows[targetIndex]
+    Loop cycleWindows.Length {
+        targetIndex := Mod(baseIndex + A_Index - 1, cycleWindows.Length) + 1
+        target := cycleWindows[targetIndex]
 
         DebugLog("cycle try index=" targetIndex " " DescribeWindow(target))
         if ActivateWindow(target) {
@@ -642,7 +654,7 @@ CycleWindowsCore(allowRefreshOnFailure := true) {
     if allowRefreshOnFailure {
         DebugLog("cycle refresh after failed activation")
         RefreshWindows(false, false)
-        if (Windows.Length > 0) {
+        if (GetIncludedWindows().Length > 0) {
             CycleWindowsCore(false)
             return
         }
@@ -650,20 +662,63 @@ CycleWindowsCore(allowRefreshOnFailure := true) {
     ShowTip("Could not activate any Dofus window.")
 }
 
-LogWindowOrder() {
+GetIncludedWindows() {
     global Windows
 
-    for index, win in Windows
+    included := []
+    for _, win in Windows {
+        if IsWindowIncluded(win)
+            included.Push(win)
+    }
+    return included
+}
+
+IsWindowIncluded(win) {
+    return !win.Has("included") || !!win["included"]
+}
+
+SetWindowIncluded(row, included) {
+    global Windows
+
+    if (row < 1 || row > Windows.Length)
+        return
+
+    Windows[row]["included"] := !!included
+    SaveOrder()
+    UpdateStatusText()
+}
+
+IncludedWindowCount() {
+    global Windows
+
+    count := 0
+    for _, win in Windows {
+        if IsWindowIncluded(win)
+            count += 1
+    }
+    return count
+}
+
+LogWindowOrder(windowsToLog := 0) {
+    global Windows
+
+    if !IsObject(windowsToLog)
+        windowsToLog := Windows
+
+    for index, win in windowsToLog
         DebugLog("order[" index "] " DescribeWindow(win))
 }
 
-FindWindowIndexByHwnd(hwnd) {
+FindWindowIndexByHwnd(hwnd, windowsToSearch := 0) {
     global Windows
 
     if !hwnd
         return 0
 
-    for index, win in Windows {
+    if !IsObject(windowsToSearch)
+        windowsToSearch := Windows
+
+    for index, win in windowsToSearch {
         if (win["hwnd"] = hwnd)
             return index
     }
@@ -686,6 +741,7 @@ RefreshWindows(shouldNotify := false, saveIfAny := true) {
             oldHwnd := oldWin["hwnd"]
             if (hwndBuckets.Has(oldHwnd) && hwndBuckets[oldHwnd].Length > 0) {
                 win := hwndBuckets[oldHwnd].RemoveAt(1)
+                win["included"] := IsWindowIncluded(oldWin)
                 ordered.Push(win)
                 added[win["hwnd"]] := true
                 continue
@@ -695,6 +751,7 @@ RefreshWindows(shouldNotify := false, saveIfAny := true) {
             if (signatureBuckets.Has(signature) && signatureBuckets[signature].Length > 0) {
                 win := signatureBuckets[signature].RemoveAt(1)
                 if !added.Has(win["hwnd"]) {
+                    win["included"] := IsWindowIncluded(oldWin)
                     ordered.Push(win)
                     added[win["hwnd"]] := true
                 }
@@ -765,7 +822,8 @@ DiscoverDofusWindows() {
             "pid", pid,
             "process", process,
             "title", title,
-            "signature", MakeSignature(process, title)
+            "signature", MakeSignature(process, title),
+            "included", GetSavedIncluded(MakeSignature(process, title))
         ))
     }
 
@@ -938,14 +996,16 @@ SelectRow(row) {
 }
 
 UpdateListView() {
-    global Windows, WindowListView, StatusText
+    global Windows, WindowListView, IsUpdatingListView
 
     if !WindowListView
         return
 
+    IsUpdatingListView := true
     WindowListView.Delete()
     for index, win in Windows
-        WindowListView.Add("", index, HwndHex(win["hwnd"]), win["pid"], win["process"], win["title"])
+        WindowListView.Add(IsWindowIncluded(win) ? "Check" : "", index, HwndHex(win["hwnd"]), win["pid"], win["process"], win["title"])
+    IsUpdatingListView := false
 
     WindowListView.ModifyCol(1, 42)
     WindowListView.ModifyCol(2, 92)
@@ -953,8 +1013,36 @@ UpdateListView() {
     WindowListView.ModifyCol(4, 100)
     WindowListView.ModifyCol(5, 360)
 
+    UpdateStatusText()
+}
+
+WindowIncludedChanged(ctrl, row, params*) {
+    global IsUpdatingListView
+
+    if IsUpdatingListView
+        return
+
+    checked := params.Length ? !!params[1] : IsListViewRowChecked(row)
+    SetWindowIncluded(row, checked)
+}
+
+IsListViewRowChecked(row) {
+    global WindowListView
+
+    if !WindowListView
+        return false
+
+    try
+        return WindowListView.GetNext(row - 1, "Checked") = row
+    catch
+        return false
+}
+
+UpdateStatusText() {
+    global Windows, StatusText
+
     if StatusText
-        StatusText.Value := Windows.Length " Dofus window(s) detected."
+        StatusText.Value := Windows.Length " Dofus window(s) detected, " IncludedWindowCount() " included."
 }
 
 LoadSavedOrder() {
@@ -972,19 +1060,53 @@ LoadSavedOrder() {
     return order
 }
 
+LoadSavedIncluded() {
+    global SETTINGS_FILE
+
+    included := Map()
+    count := Integer(IniRead(SETTINGS_FILE, "Included", "Count", 0))
+
+    Loop count {
+        signature := IniRead(SETTINGS_FILE, "Included", "Item" A_Index, "")
+        value := IniRead(SETTINGS_FILE, "Included", "Value" A_Index, "1")
+        if (signature != "")
+            included[signature] := value != "0"
+    }
+
+    return included
+}
+
+GetSavedIncluded(signature) {
+    global SavedIncluded
+
+    return SavedIncluded.Has(signature) ? SavedIncluded[signature] : true
+}
+
 SaveOrder() {
-    global SETTINGS_DIR, SETTINGS_FILE, Windows, SavedOrder
+    global SETTINGS_DIR, SETTINGS_FILE, Windows, SavedOrder, SavedIncluded
 
     DirCreate SETTINGS_DIR
     SavedOrder := []
-    for _, win in Windows
+    SavedIncluded := Map()
+
+    for _, win in Windows {
         SavedOrder.Push(win["signature"])
+        SavedIncluded[win["signature"]] := IsWindowIncluded(win)
+    }
 
     try IniDelete SETTINGS_FILE, "Order"
+    try IniDelete SETTINGS_FILE, "Included"
+
     IniWrite SavedOrder.Length, SETTINGS_FILE, "Order", "Count"
+    IniWrite Windows.Length, SETTINGS_FILE, "Included", "Count"
 
     for index, signature in SavedOrder
         IniWrite signature, SETTINGS_FILE, "Order", "Item" index
+
+    for index, win in Windows {
+        IniWrite win["signature"], SETTINGS_FILE, "Included", "Item" index
+        IniWrite IsWindowIncluded(win) ? "1" : "0", SETTINGS_FILE, "Included", "Value" index
+    }
 }
 
 MaybeShowNoWindowTip() {

@@ -16,8 +16,11 @@ The app only changes Windows focus. It does not click, send gameplay keys, repea
 1. Run `DofusWindowCycler.ahk` with AutoHotkey v2.
 2. Open the tray icon and choose `Open`.
 3. Click `Refresh` if your Dofus windows are not listed.
-4. Reorder windows with `Move Up`, `Move Down`, `Send First`, and `Send Last`.
-5. Use `Listen...` to set the cycle shortcut.
+4. Use the checkbox beside each window to include or exclude it from cycling.
+5. Reorder windows with `Move Up`, `Move Down`, `Send First`, and `Send Last`.
+6. Use `Listen...` to set the cycle shortcut.
+
+Newly detected windows are checked by default. Unchecked windows remain visible in the list so they can be re-enabled later.
 
 Supported shortcut capture includes keyboard keys, `MButton`, `XButton1`, and `XButton2`.
 
