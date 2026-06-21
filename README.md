@@ -22,13 +22,15 @@ The app only changes Windows focus. It does not click, send gameplay keys, repea
 
 Newly detected windows are checked by default. Unchecked windows remain visible in the list so they can be re-enabled later.
 
+The main window is a compact native Windows UI. Use `Cycling enabled` to pause or resume from the UI without opening the tray menu.
+
 Supported shortcut capture includes keyboard keys, `MButton`, `XButton1`, and `XButton2`.
 
 `XButton1` and `XButton2` are owned by the switcher while it is running, so browser Back/Forward behavior may not pass through.
 
 ## Debugging
 
-Debug is off by default for faster cycling.
+Debug is off by default for faster cycling, and the diagnostics panel stays hidden until debug is enabled.
 
 Enable `Debug Enabled` from the tray or UI when investigating an issue. Logs appear in the UI and are also written to:
 
