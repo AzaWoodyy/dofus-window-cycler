@@ -2,6 +2,8 @@
 
 AutoHotkey v2 tray app for cycling through open Dofus windows in a chosen order.
 
+Unofficial tool, not affiliated with Ankama.
+
 The app only changes Windows focus. It does not click, send gameplay keys, repeat actions, or automate Dofus gameplay.
 
 ## Requirements
