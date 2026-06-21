@@ -18,11 +18,16 @@ CycleHotkeyRegistered := ""
 AllowedCaptureKeys := BuildAllowedCaptureKeys()
 BlockedCaptureKeys := ["LButton", "RButton", "WheelUp", "WheelDown", "WheelLeft", "WheelRight"]
 MainGui := 0
+MainGuiVisible := false
 WindowListView := 0
 StatusText := 0
 CycleShortcutText := 0
 HotkeyStatusText := 0
+PauseCheckbox := 0
 DebugCheckbox := 0
+DebugTitleText := 0
+DebugClearButton := 0
+DebugCopyButton := 0
 DebugEdit := 0
 DebugLines := []
 DebugEnabled := false
@@ -334,10 +339,13 @@ ResetCycleHotkey(*) {
 }
 
 UpdateHotkeyUi() {
-    global CycleHotkey, CycleShortcutText, HotkeyStatusText, IsPaused, ListeningForHotkey
+    global CycleHotkey, CycleShortcutText, HotkeyStatusText, IsPaused, ListeningForHotkey, PauseCheckbox
 
     if CycleShortcutText
-        CycleShortcutText.Value := FormatHotkeyForDisplay(CycleHotkey)
+        CycleShortcutText.Value := "Shortcut: " FormatHotkeyForDisplay(CycleHotkey)
+
+    if PauseCheckbox
+        PauseCheckbox.Value := IsPaused ? 0 : 1
 
     if HotkeyStatusText {
         if ListeningForHotkey
@@ -345,7 +353,7 @@ UpdateHotkeyUi() {
         else if IsPaused
             HotkeyStatusText.Value := "Cycling is paused."
         else
-            HotkeyStatusText.Value := ""
+            HotkeyStatusText.Value := "Ready."
     }
 }
 
@@ -378,7 +386,14 @@ DebugLog(message) {
 }
 
 UpdateDebugUi() {
-    global DebugEdit, DebugLines
+    global DebugEdit, DebugLines, DebugEnabled, DebugTitleText, DebugClearButton, DebugCopyButton
+
+    for _, ctrl in [DebugTitleText, DebugClearButton, DebugCopyButton, DebugEdit] {
+        if ctrl
+            ctrl.Visible := DebugEnabled
+    }
+
+    ResizeMainGuiIfVisible()
 
     if !DebugEdit
         return
@@ -466,43 +481,75 @@ BuildTrayMenu() {
 }
 
 ShowMainGui(*) {
-    global MainGui
+    global MainGui, MainGuiVisible
 
     RefreshWindows(false, false)
     if !MainGui
         BuildMainGui()
 
     UpdateListView()
-    MainGui.Show("w720 h610")
+    UpdateHotkeyUi()
+    UpdateDebugUi()
+    MainGuiVisible := true
+    MainGui.Show("w760 h" MainGuiHeight())
 }
 
 BuildMainGui() {
-    global APP_NAME, MainGui, WindowListView, StatusText, CycleShortcutText, HotkeyStatusText, DebugCheckbox, DebugEdit, DebugEnabled
+    global APP_NAME, MainGui
 
-    MainGui := Gui("+MinSize720x610", APP_NAME)
-    MainGui.SetFont("s9", "Segoe UI")
-    MainGui.Add("Text", "xm ym w680", "Detected Dofus windows. The cycle shortcut follows this order.")
-    WindowListView := MainGui.Add("ListView", "xm y+8 w680 h220 -Multi Checked", ["#", "HWND", "PID", "Process", "Title"])
+    MainGui := Gui("+MinSize760x500", APP_NAME)
+    MainGui.BackColor := "F7F8FA"
+    MainGui.SetFont("s9 c202124", "Segoe UI")
 
-    btnRefresh := MainGui.Add("Button", "xm y+12 w90", "Refresh")
-    btnUp := MainGui.Add("Button", "x+8 yp w90", "Move Up")
-    btnDown := MainGui.Add("Button", "x+8 yp w90", "Move Down")
-    btnFirst := MainGui.Add("Button", "x+8 yp w90", "Send First")
-    btnLast := MainGui.Add("Button", "x+8 yp w90", "Send Last")
-    btnClose := MainGui.Add("Button", "x+8 yp w90", "Close")
+    BuildHeaderUi()
+    BuildWindowListUi()
+    BuildShortcutUi()
+    BuildDiagnosticsUi()
 
-    MainGui.Add("Text", "xm y+14 w105", "Cycle shortcut:")
-    CycleShortcutText := MainGui.Add("Text", "x+8 yp w160", "")
-    btnListen := MainGui.Add("Button", "x+8 yp-4 w90", "Listen...")
-    btnResetHotkey := MainGui.Add("Button", "x+8 yp w90", "Reset to F21")
+    MainGui.OnEvent("Close", HideMainGui)
 
-    HotkeyStatusText := MainGui.Add("Text", "xm y+8 w680", "")
-    StatusText := MainGui.Add("Text", "xm y+8 w680", "")
+    UpdateStatusText()
+    UpdateHotkeyUi()
+    UpdateDebugUi()
+}
 
-    DebugCheckbox := MainGui.Add("CheckBox", "xm y+10 w120 Checked" (DebugEnabled ? "1" : "0"), "Debug Enabled")
-    btnClearDebug := MainGui.Add("Button", "x+8 yp-4 w90", "Clear Debug")
-    btnCopyDebug := MainGui.Add("Button", "x+8 yp w90", "Copy Debug")
-    DebugEdit := MainGui.Add("Edit", "xm y+6 w680 h135 ReadOnly -Wrap")
+BuildHeaderUi() {
+    global APP_NAME, MainGui, StatusText, CycleShortcutText, PauseCheckbox
+
+    MainGui.SetFont("s13 Bold c202124", "Segoe UI")
+    MainGui.Add("Text", "x16 y14 w360 h26", APP_NAME)
+
+    MainGui.SetFont("s9 Norm c5F6368", "Segoe UI")
+    StatusText := MainGui.Add("Text", "x16 y42 w430 h20", "")
+
+    MainGui.SetFont("s9 Bold c202124", "Segoe UI")
+    CycleShortcutText := MainGui.Add("Text", "x520 y18 w224 h22 Right", "")
+
+    MainGui.SetFont("s9 Norm c202124", "Segoe UI")
+    PauseCheckbox := MainGui.Add("CheckBox", "x604 y44 w140 h20 Checked1", "Cycling enabled")
+    PauseCheckbox.OnEvent("Click", TogglePauseFromUi)
+
+    MainGui.Add("Text", "x16 y74 w728 h1 0x10")
+}
+
+BuildWindowListUi() {
+    global MainGui, WindowListView
+
+    MainGui.SetFont("s9 Bold c202124", "Segoe UI")
+    MainGui.Add("Text", "x16 y88 w180 h20", "Cycle order")
+
+    MainGui.SetFont("s9 Norm c5F6368", "Segoe UI")
+    MainGui.Add("Text", "x520 y88 w224 h20 Right", "Unchecked rows stay visible")
+
+    MainGui.SetFont("s9 Norm c202124", "Segoe UI")
+    WindowListView := MainGui.Add("ListView", "x16 y112 w728 h228 -Multi Checked", ["#", "Title", "Process", "PID", "HWND"])
+
+    btnRefresh := MainGui.Add("Button", "x16 y352 w88 h28", "Refresh")
+    btnUp := MainGui.Add("Button", "x112 yp w88 h28", "Move Up")
+    btnDown := MainGui.Add("Button", "x208 yp w88 h28", "Move Down")
+    btnFirst := MainGui.Add("Button", "x304 yp w96 h28", "Send First")
+    btnLast := MainGui.Add("Button", "x408 yp w96 h28", "Send Last")
+    btnClose := MainGui.Add("Button", "x656 yp w88 h28", "Close")
 
     btnRefresh.OnEvent("Click", (*) => RefreshWindows(true, false))
     btnUp.OnEvent("Click", MoveSelectedUp)
@@ -510,23 +557,64 @@ BuildMainGui() {
     btnFirst.OnEvent("Click", SendSelectedFirst)
     btnLast.OnEvent("Click", SendSelectedLast)
     btnClose.OnEvent("Click", HideMainGui)
+    WindowListView.OnEvent("ItemCheck", WindowIncludedChanged)
+}
+
+BuildShortcutUi() {
+    global MainGui, HotkeyStatusText
+
+    MainGui.Add("Text", "x16 y394 w728 h1 0x10")
+
+    MainGui.SetFont("s9 Bold c202124", "Segoe UI")
+    MainGui.Add("Text", "x16 y410 w90 h20", "Shortcut")
+
+    MainGui.SetFont("s9 Norm c202124", "Segoe UI")
+    btnListen := MainGui.Add("Button", "x112 y406 w88 h28", "Listen...")
+    btnResetHotkey := MainGui.Add("Button", "x208 yp w104 h28", "Reset to F21")
+    HotkeyStatusText := MainGui.Add("Text", "x328 y411 w416 h20", "")
+
     btnListen.OnEvent("Click", StartHotkeyListen)
     btnResetHotkey.OnEvent("Click", ResetCycleHotkey)
-    DebugCheckbox.OnEvent("Click", ToggleDebugFromUi)
-    btnClearDebug.OnEvent("Click", ClearDebugLog)
-    btnCopyDebug.OnEvent("Click", CopyDebugLog)
-    WindowListView.OnEvent("ItemCheck", WindowIncludedChanged)
-    MainGui.OnEvent("Close", HideMainGui)
+}
 
-    UpdateHotkeyUi()
-    UpdateDebugUi()
+BuildDiagnosticsUi() {
+    global MainGui, DebugCheckbox, DebugTitleText, DebugClearButton, DebugCopyButton, DebugEdit, DebugEnabled
+
+    DebugCheckbox := MainGui.Add("CheckBox", "x16 y452 w130 h22 Checked" (DebugEnabled ? "1" : "0"), "Debug Enabled")
+    DebugCheckbox.OnEvent("Click", ToggleDebugFromUi)
+
+    MainGui.SetFont("s9 Bold c202124", "Segoe UI")
+    DebugTitleText := MainGui.Add("Text", "x16 y488 w180 h20", "Diagnostics")
+
+    MainGui.SetFont("s9 Norm c202124", "Segoe UI")
+    DebugClearButton := MainGui.Add("Button", "x560 y484 w88 h28", "Clear Debug")
+    DebugCopyButton := MainGui.Add("Button", "x656 yp w88 h28", "Copy Debug")
+    DebugEdit := MainGui.Add("Edit", "x16 y522 w728 h120 ReadOnly -Wrap")
+
+    DebugClearButton.OnEvent("Click", ClearDebugLog)
+    DebugCopyButton.OnEvent("Click", CopyDebugLog)
 }
 
 HideMainGui(*) {
-    global MainGui
+    global MainGui, MainGuiVisible
 
-    if MainGui
+    if MainGui {
         MainGui.Hide()
+        MainGuiVisible := false
+    }
+}
+
+MainGuiHeight() {
+    global DebugEnabled
+
+    return DebugEnabled ? 660 : 500
+}
+
+ResizeMainGuiIfVisible() {
+    global MainGui, MainGuiVisible
+
+    if (MainGui && MainGuiVisible)
+        MainGui.Show("w760 h" MainGuiHeight())
 }
 
 RefreshFromTray(*) {
@@ -536,14 +624,29 @@ RefreshFromTray(*) {
 TogglePause(*) {
     global IsPaused
 
-    IsPaused := !IsPaused
+    SetPaused(!IsPaused, true)
+}
+
+TogglePauseFromUi(*) {
+    global PauseCheckbox
+
+    SetPaused(!PauseCheckbox.Value, true)
+}
+
+SetPaused(paused, notify := true) {
+    global IsPaused
+
+    paused := !!paused
+    IsPaused := paused
     SetCycleHotkeyEnabled(!IsPaused)
     if IsPaused {
         A_TrayMenu.Check("Pause Cycling")
-        ShowTip("Cycling paused.")
+        if notify
+            ShowTip("Cycling paused.")
     } else {
         A_TrayMenu.Uncheck("Pause Cycling")
-        ShowTip("Cycling enabled.")
+        if notify
+            ShowTip("Cycling enabled.")
     }
     UpdateHotkeyUi()
 }
@@ -1004,14 +1107,14 @@ UpdateListView() {
     IsUpdatingListView := true
     WindowListView.Delete()
     for index, win in Windows
-        WindowListView.Add(IsWindowIncluded(win) ? "Check" : "", index, HwndHex(win["hwnd"]), win["pid"], win["process"], win["title"])
+        WindowListView.Add(IsWindowIncluded(win) ? "Check" : "", index, win["title"], win["process"], win["pid"], HwndHex(win["hwnd"]))
     IsUpdatingListView := false
 
     WindowListView.ModifyCol(1, 42)
-    WindowListView.ModifyCol(2, 92)
-    WindowListView.ModifyCol(3, 70)
-    WindowListView.ModifyCol(4, 100)
-    WindowListView.ModifyCol(5, 360)
+    WindowListView.ModifyCol(2, 408)
+    WindowListView.ModifyCol(3, 116)
+    WindowListView.ModifyCol(4, 60)
+    WindowListView.ModifyCol(5, 94)
 
     UpdateStatusText()
 }
@@ -1042,7 +1145,7 @@ UpdateStatusText() {
     global Windows, StatusText
 
     if StatusText
-        StatusText.Value := Windows.Length " Dofus window(s) detected, " IncludedWindowCount() " included."
+        StatusText.Value := Windows.Length " detected, " IncludedWindowCount() " included."
 }
 
 LoadSavedOrder() {
